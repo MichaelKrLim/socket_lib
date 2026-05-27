@@ -2,6 +2,7 @@
 #define SOCKET_LIB_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <netinet/in.h>
 #include <optional>
 #include <span>
@@ -34,7 +35,7 @@ class Socket
 	public:
 
 	explicit Socket(int handle)
-	:	file_descriptor_(handle)
+		:	file_descriptor_(handle)
 	{}
 
 	~Socket()
@@ -51,8 +52,22 @@ class Socket
 	Socket(const Socket&)=delete;
 	Socket& operator=(const Socket&)=delete;
 
-	Socket(Socket&&)=default;
-	Socket& operator=(Socket&&)=default;
+	Socket(Socket&& other)
+	{
+		file_descriptor_=*other.file_descriptor_;
+		other.file_descriptor_=std::nullopt;
+	}
+
+	Socket& operator=(Socket&& other)
+	{
+		if(file_descriptor_)
+			close(*file_descriptor_);
+
+		file_descriptor_=*other.file_descriptor_;
+		other.file_descriptor_=std::nullopt;
+
+		return *this;
+	}
 
 	private:
 
@@ -69,9 +84,14 @@ class Connection
 		, config_(config)
 	{}
 
-	void await_content(std::span<std::byte> buffer)
+	ssize_t await_content(std::span<std::byte> buffer)
 	{
-		recv(socket_, buffer.data(), buffer.size(), config_);
+		ssize_t bytes_used = recv(socket_, buffer.data(), buffer.size(), config_);
+
+		if(bytes_used==-1)
+			throw std::runtime_error{"recv error"};
+
+		return bytes_used;
 	}
 
 	void send_content(std::span<const std::byte> response)
@@ -90,8 +110,8 @@ class Listener
 {
 	public:
 
-	Listener(int port_to_listen_over, int queue_length, int config = 0)
-	:	socket_(socket(AF_INET, SOCK_STREAM, config))
+	Listener(std::uint16_t port_to_listen_over, int queue_length, int config = 0)
+		:	socket_(socket(AF_INET, SOCK_STREAM, config))
 	{
 		const sockaddr_in address{ .sin_family=AF_INET, .sin_port=htons(port_to_listen_over), .sin_addr=INADDR_ANY };
 		if(bind(socket_, cast_to_c_abstract_base<sockaddr>(&address), sizeof(address))!=0)
